@@ -89,6 +89,35 @@ resource "azurerm_subnet_network_security_group_association" "aks_nsg_associatio
   ]
 }
 
+# Add these rules to your existing NSG
+resource "azurerm_network_security_rule" "allow_lb" {
+  name                        = "allow_lb"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "*"
+  source_port_range           = "*"
+  destination_port_range      = "*"
+  source_address_prefix       = "AzureLoadBalancer"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.rg_name
+  network_security_group_name = azurerm_network_security_group.aks_nsg.name
+}
+
+resource "azurerm_network_security_rule" "allow_internal" {
+  name                        = "allow_internal"
+  priority                    = 110
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "*"
+  source_port_range           = "*"
+  destination_port_range      = "*"
+  source_address_prefix       = "VirtualNetwork"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.rg_name
+  network_security_group_name = azurerm_network_security_group.aks_nsg.name
+}
+
 ################## AKS ##################
 
 # Azure Kubernetes Service (AKS) cluster configuration
@@ -131,17 +160,13 @@ resource "azurerm_kubernetes_cluster" "aks_back" {
     type = "SystemAssigned"
   }
 
-  # Web App Routing - Can be enabled/configured if needed later
+  # Web App Routing configuration
   web_app_routing {
-    dns_zone_ids = null
+    dns_zone_id = azurerm_private_dns_zone.privatedns_aks.id
   }
 
-  # Lifecycle settings to ignore specific changes
-  lifecycle {
-    ignore_changes = [
-      default_node_pool.0.upgrade_settings
-    ]
-  }
+  # Add this to enable app routing with NGINX
+  http_application_routing_enabled = true
 
   oms_agent {
     log_analytics_workspace_id = azurerm_log_analytics_workspace.aks.id
