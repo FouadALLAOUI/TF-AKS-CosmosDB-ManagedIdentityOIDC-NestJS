@@ -12,5 +12,4 @@ spec:
     name: port-service
   selector:
     app: test-app
-  #loadBalancerIP: 10.0.0.10
 
