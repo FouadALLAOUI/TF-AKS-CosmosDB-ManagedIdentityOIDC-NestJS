@@ -1,0 +1,14 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: test-pod
+  namespace: nostradamus
+  labels:
+    app: test-app
+spec:
+  restartPolicy: Always
+  containers:
+  - name: test-container
+    image: nginx:latest
+    ports:
+    - containerPort: 3000
