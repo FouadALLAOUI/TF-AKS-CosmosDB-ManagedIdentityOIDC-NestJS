@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: internal-load-balancer
+  namespace: app-routing-system
+data:
+  load-balancer-mode: "internal"

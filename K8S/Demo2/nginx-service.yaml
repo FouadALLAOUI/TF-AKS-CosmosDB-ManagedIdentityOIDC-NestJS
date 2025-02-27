@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    # Specify the subnet where you want the private IP
+    service.beta.kubernetes.io/azure-load-balancer-internal-subnet: "aks-subnet"
+  name: nginx
+  namespace: app-routing-system
+spec:
+  type: LoadBalancer
+  loadBalancerIP: "10.0.0.100" # Choose an available IP from your subnet range
