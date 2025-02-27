@@ -1,3 +1,204 @@
+resource "azurerm_resource_group" "apim_resource" {
+  name     = "rg_apim"
+  location = "eastus"
+}
+
+# External API Management
+resource "azurerm_api_management" "external_apim" {
+  name                = "external-apim-demo"
+  location            = azurerm_resource_group.apim_resource.location
+  resource_group_name = azurerm_resource_group.apim_resource.name
+  publisher_name      = "Demo Company"
+  publisher_email     = "admin@democompany.com"
+
+  sku_name = "Developer_1" # You can change to Premium_1 for production
+
+  virtual_network_type = "External"
+
+  # Add virtual network configuration
+  virtual_network_configuration {
+    subnet_id = azurerm_subnet.apim_subnet.id
+  }
+
+  # Public IP configuration
+  public_ip_address_id = azurerm_public_ip.apim_public_ip.id
+
+  protocols {
+    enable_http2 = true
+  }
+
+  security {
+    enable_backend_ssl30 = false
+  }
+}
+
+# Public IP for APIM
+resource "azurerm_public_ip" "apim_public_ip" {
+  name                = "apim-public-ip"
+  resource_group_name = azurerm_resource_group.apim_resource.name
+  location            = azurerm_resource_group.apim_resource.location
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  domain_name_label   = "external-apim-demo-${lower(replace(azurerm_resource_group.apim_resource.name, "_", "-"))}"
+
+  tags = {
+    environment = "production"
+    purpose     = "APIM"
+  }
+}
+
+# NSG for APIM
+resource "azurerm_network_security_group" "apim_nsg" {
+  name                = "apim-nsg"
+  location            = azurerm_resource_group.apim_resource.location
+  resource_group_name = azurerm_resource_group.apim_resource.name
+
+  security_rule {
+    name                       = "Allow-APIM-Management-Endpoint"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3443"
+    source_address_prefix      = "ApiManagement"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "Allow-HTTPS"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "Internet"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "Allow-HTTP"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "Internet"
+    destination_address_prefix = "VirtualNetwork"
+  }
+}
+
+# Create a diagnostic setting for APIM
+resource "azurerm_monitor_diagnostic_setting" "apim_diagnostics" {
+  name                       = "apim-diagnostics"
+  target_resource_id         = azurerm_api_management.external_apim.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.apim_logs.id
+
+  enabled_log {
+    category = "GatewayLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
+}
+
+# Log Analytics Workspace for APIM
+resource "azurerm_log_analytics_workspace" "apim_logs" {
+  name                = "apim-logs-workspace"
+  location            = azurerm_resource_group.apim_resource.location
+  resource_group_name = azurerm_resource_group.apim_resource.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+# Add API configuration
+resource "azurerm_api_management_api" "example_api" {
+  name                = "example-api"
+  resource_group_name = azurerm_resource_group.apim_resource.name
+  api_management_name = azurerm_api_management.external_apim.name
+  revision            = "1"
+  display_name        = "Example API"
+  path                = "api"
+  protocols           = ["https"]
+
+  # Option 1: Remove the import block if you don't have a swagger file
+  # Option 2: Use inline OpenAPI specification
+  import {
+    content_format = "openapi+json"
+    content_value = jsonencode({
+      openapi = "3.0.1"
+      info = {
+        title   = "Example API"
+        version = "1.0"
+      }
+      paths = {
+        "/hello" = {
+          get = {
+            responses = {
+              "200" = {
+                description = "OK"
+              }
+            }
+          }
+        }
+      }
+    })
+  }
+}
+
+# Add API policy
+resource "azurerm_api_management_api_policy" "example_policy" {
+  api_name            = azurerm_api_management_api.example_api.name
+  api_management_name = azurerm_api_management.external_apim.name
+  resource_group_name = azurerm_resource_group.apim_resource.name
+
+  xml_content = <<XML
+<policies>
+  <inbound>
+    <base />
+    <set-backend-service base-url="http://172.26.103.103" />
+  </inbound>
+</policies>
+XML
+}
+
+# Create VNET for APIM
+resource "azurerm_virtual_network" "apim_vnet" {
+  name                = "apim-vnet"
+  resource_group_name = azurerm_resource_group.apim_resource.name
+  location            = azurerm_resource_group.apim_resource.location
+  address_space       = ["10.0.0.0/16"]
+}
+
+# Create Subnet for APIM
+resource "azurerm_subnet" "apim_subnet" {
+  name                 = "apim-subnet"
+  resource_group_name  = azurerm_resource_group.apim_resource.name
+  virtual_network_name = azurerm_virtual_network.apim_vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
+
+  # Required service endpoints for APIM
+  service_endpoints = [
+    "Microsoft.Web",
+    "Microsoft.KeyVault",
+    "Microsoft.ServiceBus"
+  ]
+}
+
+# Associate NSG with APIM subnet
+resource "azurerm_subnet_network_security_group_association" "apim_nsg_association" {
+  subnet_id                 = azurerm_subnet.apim_subnet.id
+  network_security_group_id = azurerm_network_security_group.apim_nsg.id
+}
+
+
+
+
+/*
 resource "azurerm_resource_group" "rg" {
   name     = var.rg_name
   location = var.rg_location
@@ -162,7 +363,7 @@ resource "azurerm_kubernetes_cluster" "aks_back" {
 
   # Web App Routing configuration
   web_app_routing {
-    dns_zone_id = azurerm_private_dns_zone.privatedns_aks.id
+    dns_zone_ids = [azurerm_private_dns_zone.privatedns_aks.id]
   }
 
   # Add this to enable app routing with NGINX
@@ -259,6 +460,15 @@ resource "azurerm_cosmosdb_account" "db_account" {
     location          = var.rg_location
     failover_priority = 0
   }
+
+  # Add public network access configuration
+  public_network_access_enabled = true
+
+  # Add IP rules if needed
+  ip_range_filter = "0.0.0.0" # Be careful with this in production!
+
+  # Add this to ensure proper key management
+  key_vault_key_id = null # Remove any key vault references for now
 
   depends_on = [
     azurerm_resource_group.rg,
@@ -390,6 +600,8 @@ resource "azurerm_role_assignment" "cosmosdb_account_contributor" {
   ]
 }
 
+
+/*
 # Assigning the role of Cosmos DB Account Contributor to the User Assigned Identity
 //resource "azurerm_role_assignment" "cosmosdb_account_contributor" {
 //  scope                = azurerm_cosmosdb_account.db_account.id
@@ -410,7 +622,7 @@ resource "azurerm_role_assignment" "cosmosdb_account_contributor" {
 #  principal_id        = azurerm_user_assigned_identity.user_assigned_identity.principal_id
 #  role_definition_id  = "00000000-0000-0000-0000-000000000001"
 #}
-
+*/
 
 
 
