@@ -10,6 +10,14 @@ variable "rg_location" {
   default     = "West Europe"
 }
 
+variable "key_vault_name" {
+  type        = string
+  description = "Key Vault name"
+  default     = "nostradamus-keyvault"
+}
+
+
+
 variable "backend_vnet_name" {
   type        = string
   description = "Backend virtual network name"
